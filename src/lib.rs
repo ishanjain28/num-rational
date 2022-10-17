@@ -1085,13 +1085,47 @@ macro_rules! impl_formatting {
     };
 }
 
-impl_formatting!(Display, "", "{}", "{:#}");
-impl_formatting!(Octal, "0o", "{:o}", "{:#o}");
-impl_formatting!(Binary, "0b", "{:b}", "{:#b}");
-impl_formatting!(LowerHex, "0x", "{:x}", "{:#x}");
-impl_formatting!(UpperHex, "0x", "{:X}", "{:#X}");
-impl_formatting!(LowerExp, "", "{:e}", "{:#e}");
-impl_formatting!(UpperExp, "", "{:E}", "{:#E}");
+use std::string::String;
+
+impl<T> Ratio<T>
+where
+    T: fmt::Display + Clone + FromPrimitive + Integer + Signed,
+{
+    /// Generates decimal approximation to a specified precision as a String.
+    pub fn as_decimal(&self, precision: usize) -> String {
+        use num_traits::pow;
+        use std::string::ToString;
+        let ten_pow_prec = pow(T::from_usize(10).unwrap(), precision);
+        let rounded = (self.clone() * &ten_pow_prec).round();
+        let minus = rounded < Zero::zero();
+        let trunc = &((&rounded / &ten_pow_prec).trunc().to_integer());
+        let tail = &(rounded % ten_pow_prec).abs().to_integer();
+        let mut ret_val = String::from("");
+        if tail.is_zero() {
+            ret_val.push_str(&trunc.to_string());
+        } else {
+            if minus {
+                ret_val.push_str("-")
+            };
+            ret_val.push_str(&trunc.to_string());
+        }
+        ret_val.push_str(".");
+        let tail_strarr = &tail.to_string();
+        let tail_length = &tail_strarr.chars().count();
+        let tail_zeroes = if *tail_length < precision {
+            // If rust >= 1.16.0 - we can simply use repeat.
+            // "0".repeat(precision - tail_length)
+            (0..(precision - tail_length))
+                .map(|_| "0")
+                .collect::<String>()
+        } else {
+            String::from("")
+        };
+        ret_val.push_str(&tail_zeroes);
+        ret_val.push_str(&tail.to_string());
+        ret_val
+    }
+}
 
 impl<T: FromStr + Clone + Integer> FromStr for Ratio<T> {
     type Err = ParseRatioError;
@@ -2119,6 +2153,21 @@ mod test {
             assert_fmt_eq!(format_args!("{:E}", _BILLION.recip()), "1E0/1E9");
             assert_fmt_eq!(format_args!("{:+E}", _BILLION.recip()), "+1E0/1E9");
         }
+    }
+
+    #[test]
+    #[cfg(feature = "std")]
+    fn test_as_decimal() {
+        use std::string::ToString;
+        assert_eq!(_2.as_decimal(2), "2.00".to_string());
+        assert_eq!(_1_2.as_decimal(2), "0.50".to_string());
+        assert_eq!(_3_2.as_decimal(1), "1.5".to_string());
+        assert_eq!(_NEG1_2.as_decimal(2), "-0.50".to_string());
+        assert_eq!(_NEG2_3.as_decimal(3), "-0.667".to_string());
+        assert_eq!(_1_8.as_decimal(2), "0.13".to_string());
+        assert_eq!(_NEG1_8.as_decimal(4), "-0.1250".to_string());
+        assert_eq!(_99999_1000.as_decimal(3), "99.999".to_string());
+        assert_eq!(_NEG99999_1000.as_decimal(1), "-100.0".to_string());
     }
 
     mod arith {
